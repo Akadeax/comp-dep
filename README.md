@@ -5,7 +5,7 @@ Working with `ActorComponent`s and `SceneComponent`s in Unreal Engine is part of
 
 To install this plugin project-local:
 
-1. Clone or download this repository
+1. Clone or download this repository (or the Release)
 2. In your game project folder, create a `Plugins` folder if you don't already have one:
 ```
 MyGameProject/
