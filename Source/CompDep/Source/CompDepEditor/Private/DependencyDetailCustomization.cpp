@@ -13,139 +13,141 @@ TArray<FName> FDependencyDetailCustomization::RegisteredClassLayoutNames{};
 
 void FDependencyDetailCustomization::ReloadCustomizations()
 {
-	UnregisterCustomizations();
-	RegisterCustomizations();
+    UnregisterCustomizations();
+    RegisterCustomizations();
 }
 
 void FDependencyDetailCustomization::RegisterCustomizations()
 {
-	FPropertyEditorModule& PEM{ FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor") };
+    FPropertyEditorModule& PEM{ FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor") };
 
-	for (TObjectIterator<UClass> it; it; ++it)
-	{
-		const UClass* current{ *it };
-		check(current);
-		if (!current->ImplementsInterface(UComponentDependencies::StaticClass())) continue;
+    for (TObjectIterator<UClass> it; it; ++it)
+    {
+        UClass* current{ *it };
+        check(current);
+        if (!current->ImplementsInterface(UComponentDependencies::StaticClass())) { continue; }
 
-		checkf(
-			current->IsChildOf(UActorComponent::StaticClass()),
-			TEXT("%s is not an ActorComponent but is trying to implement component dependencies!"),
-			*current->GetName()
-		);
-		
-		PEM.RegisterCustomClassLayout(
-			current->GetFName(),
-			FOnGetDetailCustomizationInstance::CreateStatic(&FDependencyDetailCustomization::MakeInstance)
-		);
-		RegisteredClassLayoutNames.Emplace(current->GetFName());
-	}
+        checkf(
+        current->IsChildOf(UActorComponent::StaticClass()),
+        TEXT("%s is not an ActorComponent but is trying to implement component dependencies!"),
+        *current->GetName());
+
+        PEM.RegisterCustomClassLayout(
+        current->GetFName(),
+        FOnGetDetailCustomizationInstance::CreateLambda([current]
+        {
+            return MakeInstance(current);
+        }));
+        RegisteredClassLayoutNames.Emplace(current->GetFName());
+    }
 }
 
 void FDependencyDetailCustomization::UnregisterCustomizations()
 {
-	if (!FModuleManager::Get().IsModuleLoaded("PropertyEditor")) return;
-	FPropertyEditorModule& PEM{ FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor") };
-	
-	for (const FName& classLayoutName : RegisteredClassLayoutNames)
-	{
-		PEM.UnregisterCustomClassLayout(classLayoutName);
-	}
-	
-	RegisteredClassLayoutNames.Empty();
+    if (!FModuleManager::Get().IsModuleLoaded("PropertyEditor"))
+    {
+        return;
+    }
+    FPropertyEditorModule& PEM{
+        FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor")
+    };
+
+    for (const FName& classLayoutName : RegisteredClassLayoutNames)
+    {
+        PEM.UnregisterCustomClassLayout(classLayoutName);
+    }
+
+    RegisteredClassLayoutNames.Empty();
+}
+
+TSharedRef<IDetailCustomization> FDependencyDetailCustomization::MakeInstance(UClass* Class)
+{
+    TSharedRef<FDependencyDetailCustomization> shared{ MakeShared<FDependencyDetailCustomization>() };
+    shared->RegisteredCustomizationClass = Class;
+    return shared;
 }
 
 void FDependencyDetailCustomization::CustomizeDetails(IDetailLayoutBuilder& DetailLayout)
 {
-	TArray<TWeakObjectPtr<>> selectedList;
-	DetailLayout.GetObjectsBeingCustomized(selectedList);
+    TArray<TWeakObjectPtr<>> selectedList;
+    DetailLayout.GetObjectsBeingCustomized(selectedList);
 
-	// Disallow multi-select in editor while viewing dependencies
-	if (selectedList.Num() != 1) return;
-	
-	const UObject* selectedObj{ selectedList[0].Get() };
-	check(selectedObj);
-	
-	// Only operate on CDO (Blueprint, etc.)
-	if (!selectedObj->IsTemplate()) return;
-	
-	const UActorComponent* selectedComp{ Cast<UActorComponent>(selectedObj) };
-	// It's assumed this will always be on a component as a detail customization
-	check(selectedComp);
+    // Disallow multi-select in editor while viewing dependencies
+    if (selectedList.Num() != 1) { return; }
 
-	check(selectedComp->GetClass()->ImplementsInterface(UComponentDependencies::StaticClass()));
+    const UObject* selectedObj{ selectedList[0].Get() };
+    check(selectedObj);
 
-	// These are the dependencies actually defined in the C++ class or Blueprint implementation
-	TArray<FComponentDependency> dependencies{ IComponentDependencies::Execute_GetDependencies(selectedComp) };
-	
-	IDetailCategoryBuilder& category{ DetailLayout.EditCategory(
-		TEXT("Dependencies"),
-		FText::GetEmpty(),
-		ECategoryPriority::Important)
-	};
-	
-	FSlateFontInfo dependencyTextFont{ IDetailLayoutBuilder::GetDetailFontBold() };
-	dependencyTextFont.Size = 7;
+    // Only operate on CDO (Blueprint, etc.)
+    if (!selectedObj->IsTemplate()) { return; }
 
-	FSlateFontInfo dependencyNameFont{ IDetailLayoutBuilder::GetDetailFontBold() };
-	dependencyNameFont.Size = 9;
-	
-	FSlateFontInfo resultTextFont{ IDetailLayoutBuilder::GetDetailFontBold() };
-	resultTextFont.Size = 8;
-	
-	for (const FComponentDependency& dependency : dependencies)
-	{
-		if (dependency.Class == nullptr) continue;
+    const UActorComponent* selectedComp{ Cast<UActorComponent>(selectedObj) };
+    // It's assumed this will always be on a component as a detail customization
+    check(selectedComp);
 
-		// Calc whether this dependency is fulfilled; if we're viewing in the wrong context, hide it
-		FDependencyFulfilledResult result{ FDependencyUtils::CheckDependency(selectedComp, dependency) };
-		if (!result.ShowDependency) continue;
+    check(selectedComp->GetClass()->ImplementsInterface(UComponentDependencies::StaticClass()));
 
-		// Get color based on result
-		const bool isOptional{ dependency.Type == EComponentDependencyType::Optional };
-		FSlateColor textColor{ (result.IsFulfilled || isOptional) ? FStyleColors::Success : FStyleColors::Error };
-		
-		const FString className{ dependency.Class->GetName() };
+    if (selectedComp->GetClass() != RegisteredCustomizationClass) { return; }
 
-		category.AddCustomRow(FText::FromString(className))
-		[
-			SNew(SBox)
-			.Padding(5.f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot()
-					.HAlign(HAlign_Center)
-					[
-						SNew(STextBlock)
-						.Text(FDependencyUtils::GetDependencyDescriptionText(dependency))
-						.Font(dependencyTextFont)
-						.AutoWrapText(true)
-					]
-					+ SVerticalBox::Slot()
-					.HAlign(HAlign_Center)
-					[
-						SNew(STextBlock)
-						.Text(FText::FromString(className))
-						.Font(dependencyNameFont)
-						.AutoWrapText(true)
-					]
-				]
-				+ SHorizontalBox::Slot()
-				.HAlign(HAlign_Center)
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(result.OutputString))
-					.ColorAndOpacity(textColor)
-					.Margin(FMargin(15, 0))
-					.AutoWrapText(true)
-					.Font(resultTextFont)
-				]				
-			]
-		];
-	}
+    // These are the dependencies actually defined in the C++ class or Blueprint implementation
+    TArray<FComponentDependency> dependencies{ IComponentDependencies::Execute_GetDependencies(selectedComp) };
+
+    IDetailCategoryBuilder& category{ DetailLayout.EditCategory(
+    TEXT("Dependencies"),
+    FText::GetEmpty(),
+    ECategoryPriority::Important) };
+
+    FSlateFontInfo dependencyTextFont{ IDetailLayoutBuilder::GetDetailFontBold() };
+    dependencyTextFont.Size = 7;
+
+    FSlateFontInfo dependencyNameFont{ IDetailLayoutBuilder::GetDetailFontBold() };
+    dependencyNameFont.Size = 9;
+
+    FSlateFontInfo resultTextFont{ IDetailLayoutBuilder::GetDetailFontBold() };
+    resultTextFont.Size = 8;
+
+    for (const FComponentDependency& dependency : dependencies)
+    {
+        if (dependency.Class == nullptr) { continue; }
+
+        // Calc whether this dependency is fulfilled; if we're viewing in the wrong context, hide it
+        FDependencyFulfilledResult result{ FDependencyUtils::CheckDependency(selectedComp, dependency) };
+        if (!result.ShowDependency) { continue; }
+
+        // Get color based on result
+        const bool isOptional{ dependency.Type == EComponentDependencyType::Optional };
+        FSlateColor textColor{ (result.IsFulfilled || isOptional) ? FStyleColors::Success : FStyleColors::Error };
+
+        const FString className{ dependency.Class->GetName() };
+
+        category.AddCustomRow(FText::FromString(className))
+        [SNew(SBox)
+         .Padding(5.f)
+         [SNew(SHorizontalBox)
+          + SHorizontalBox::Slot()
+          [SNew(SVerticalBox)
+           + SVerticalBox::Slot()
+             .HAlign(HAlign_Center)
+             [SNew(STextBlock)
+              .Text(FDependencyUtils::GetDependencyDescriptionText(dependency))
+              .Font(dependencyTextFont)
+              .AutoWrapText(true)]
+           + SVerticalBox::Slot()
+             .HAlign(HAlign_Center)
+             [SNew(STextBlock)
+              .Text(FText::FromString(className))
+              .Font(dependencyNameFont)
+              .AutoWrapText(true)]]
+          + SHorizontalBox::Slot()
+            .HAlign(HAlign_Center)
+            .VAlign(VAlign_Center)
+            [SNew(STextBlock)
+             .Text(FText::FromString(result.OutputString))
+             .ColorAndOpacity(textColor)
+             .Margin(FMargin(15, 0))
+             .AutoWrapText(true)
+             .Font(resultTextFont)]]];
+    }
 }
 
 #undef LOCTEXT_NAMESPACE

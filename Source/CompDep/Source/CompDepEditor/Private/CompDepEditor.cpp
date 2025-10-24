@@ -10,113 +10,107 @@
 
 void FCompDepEditorModule::StartupModule()
 {
-	FDependencyDetailCustomization::RegisterCustomizations();
-	InitializeMenu();
-	InitializeReloadHooks();
+    FDependencyDetailCustomization::RegisterCustomizations();
+    InitializeMenu();
+    InitializeReloadHooks();
 }
 
 void FCompDepEditorModule::ShutdownModule()
 {
-	FDependencyDetailCustomization::UnregisterCustomizations();
+    FDependencyDetailCustomization::UnregisterCustomizations();
 
-	if (GEditor)
-	{
-		GEditor->OnBlueprintPreCompile().Remove(BlueprintPreCompileDelegateHandle);
-	}
-	
-	UToolMenus::UnregisterOwner(FToolMenuOwner(this));
-	UToolMenus::UnRegisterStartupCallback(this);
+    if (GEditor)
+    {
+        GEditor->OnBlueprintPreCompile().Remove(BlueprintPreCompileDelegateHandle);
+    }
+
+    UToolMenus::UnregisterOwner(FToolMenuOwner(this));
+    UToolMenus::UnRegisterStartupCallback(this);
 }
 
 void FCompDepEditorModule::InitializeMenu()
 {
-	UToolMenus::RegisterStartupCallback(FSimpleDelegate::CreateRaw(this, &FCompDepEditorModule::RegisterMenus));
+    UToolMenus::RegisterStartupCallback(FSimpleDelegate::CreateRaw(this, &FCompDepEditorModule::RegisterMenus));
 }
 
 void FCompDepEditorModule::RegisterMenus()
 {
-	FToolMenuOwnerScoped(this);
+    FToolMenuOwnerScoped(this);
 
-	UToolMenu* menu{ UToolMenus::Get()->ExtendMenu("MainFrame.MainMenu") };
-	FToolMenuSection& section{ menu->FindOrAddSection(
-		"comp_dep_menu",
-		FText::FromString("CompDep"),
-		FToolMenuInsert("comp_dep", EToolMenuInsertType::Last))
-	};
-	
-	section.AddSubMenu(
-		"comp_dep_menu",
-		FText::FromString("CompDep"),
-		FText::FromString(""),
-		FNewToolMenuDelegate::CreateRaw(this, &FCompDepEditorModule::PopulateSubMenu),
-		true,
-		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Toolbar.Play")
-	);
-	
+    UToolMenu* menu{ UToolMenus::Get()->ExtendMenu("MainFrame.MainMenu") };
+    FToolMenuSection& section{ menu->FindOrAddSection(
+    "comp_dep_menu",
+    FText::FromString("CompDep"),
+    FToolMenuInsert("comp_dep", EToolMenuInsertType::Last)) };
 
+    section.AddSubMenu(
+    "comp_dep_menu",
+    FText::FromString("CompDep"),
+    FText::FromString(""),
+    FNewToolMenuDelegate::CreateRaw(this, &FCompDepEditorModule::PopulateSubMenu),
+    true,
+    FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Toolbar.Play"));
 }
 
 void FCompDepEditorModule::PopulateSubMenu(UToolMenu* Menu)
 {
-	FToolMenuSection& section{ Menu->FindOrAddSection("comp_dep", FText::FromString("CompDep")) };
-	
-	section.AddMenuEntry(
-		"reload_component_dependencies",
-		FText::FromString("Reload Component Dependencies"),
-		FText::FromString(""),
-		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Play"),
-		FExecuteAction::CreateStatic(&FDependencyDetailCustomization::ReloadCustomizations)
-	);
-	
-	section.AddMenuEntry(
-		"open_dependency_viewer",
-		FText::FromString("Open Dependency Viewer"),
-		FText::FromString(""),
-		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Fullscreen"),
-		FExecuteAction::CreateRaw(this, &FCompDepEditorModule::OpenDependencyViewer)
-	);
+    FToolMenuSection& section{ Menu->FindOrAddSection("comp_dep", FText::FromString("CompDep")) };
+
+    section.AddMenuEntry(
+    "reload_component_dependencies",
+    FText::FromString("Reload Component Dependencies"),
+    FText::FromString(""),
+    FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Play"),
+    FExecuteAction::CreateStatic(&FDependencyDetailCustomization::ReloadCustomizations));
+
+    section.AddMenuEntry(
+    "open_dependency_viewer",
+    FText::FromString("Open Dependency Viewer"),
+    FText::FromString(""),
+    FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Fullscreen"),
+    FExecuteAction::CreateRaw(this, &FCompDepEditorModule::OpenDependencyViewer));
 }
 
 void FCompDepEditorModule::OpenDependencyViewer()
 {
-	if (!GEditor) return;
+    if (!GEditor) { return; }
 
-	UEditorUtilitySubsystem* editorUtility{
-		GEditor->GetEditorSubsystem<UEditorUtilitySubsystem>()
-	};
+    UEditorUtilitySubsystem* editorUtility{
+        GEditor->GetEditorSubsystem<UEditorUtilitySubsystem>()
+    };
 
-	checkf(editorUtility, TEXT("Editor utility subsystem couldn't be loaded."));
+    checkf(editorUtility, TEXT("Editor utility subsystem couldn't be loaded."));
 
-	const FString widgetClassPath{ TEXT("/CompDep/Widgets/EUW_DependencyViewer.EUW_DependencyViewer") };
-	UEditorUtilityWidgetBlueprint* widgetClass{
-		LoadObject<UEditorUtilityWidgetBlueprint>(nullptr, *widgetClassPath)
-	};
+    const FString widgetClassPath{ TEXT("/CompDep/Widgets/EUW_DependencyViewer.EUW_DependencyViewer") };
+    UEditorUtilityWidgetBlueprint* widgetClass{
+        LoadObject<UEditorUtilityWidgetBlueprint>(nullptr, *widgetClassPath)
+    };
 
-	checkf(widgetClass, TEXT("Couldn't load dependency viewer! make sure the path is correct."));
+    checkf(widgetClass, TEXT("Couldn't load dependency viewer! make sure the path is correct."));
 
-	editorUtility->SpawnAndRegisterTab(widgetClass);
+    editorUtility->SpawnAndRegisterTab(widgetClass);
 }
 
 void FCompDepEditorModule::InitializeReloadHooks()
 {
-	// This only works because our loading phase is PostEngineInit; otherwise GEditor would be null
-	if (GEditor)
-	{
-		// Any time a blueprint that implements "UComponentDependencies" is compiled, reload our
-		// Detail customization; this is so blueprint-defined dependencies get reloaded properly.
-		// Any C++-defined ones get reloaded on engine restart anyway
-		BlueprintPreCompileDelegateHandle = GEditor->OnBlueprintPreCompile().AddLambda([](const UBlueprint* Blueprint)
-		{
-			if (!Blueprint) return;
+    // This only works because our loading phase is PostEngineInit; otherwise GEditor would be null
+    if (GEditor)
+    {
+        // Any time a blueprint that implements "UComponentDependencies" is compiled, reload our
+        // Detail customization; this is so blueprint-defined dependencies get reloaded properly.
+        // Any C++-defined ones get reloaded on engine restart anyway
+        BlueprintPreCompileDelegateHandle = GEditor->OnBlueprintPreCompile().AddLambda([](const UBlueprint* Blueprint)
+        {
+            if (!Blueprint) { return; }
 
-			const UClass* generated{ Blueprint->GeneratedClass };
-			if (!generated) return;
-			
-			if (!generated->ImplementsInterface(UComponentDependencies::StaticClass())) return;
-			
-			FDependencyDetailCustomization::ReloadCustomizations();
-		});
-	}
+            const UClass* generated{ Blueprint->GeneratedClass };
+            if (!generated) { return; }
+
+            if (!generated->ImplementsInterface(UComponentDependencies::StaticClass())) { return; }
+
+            FDependencyDetailCustomization::ReloadCustomizations();
+        });
+    }
 }
 
 #undef LOCTEXT_NAMESPACE
